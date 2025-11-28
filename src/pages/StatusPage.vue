@@ -162,10 +162,10 @@
                         {{ $t("Edit Status Page") }}
                     </button>
 
-                    <a href="/manage-status-page" class="btn btn-primary">
+                    <router-link to="/manage-status-page" class="btn btn-primary">
                         <font-awesome-icon icon="tachometer-alt" />
                         {{ $t("Go to Dashboard") }}
-                    </a>
+                    </router-link>
                 </div>
 
                 <div v-else>
@@ -441,7 +441,7 @@ export default {
             incident: null,
             previousIncident: null,
             showImageCropUpload: false,
-            imgDataUrl: "/icon.svg",
+            imgDataUrl: "./icon.svg",
             loadedTheme: false,
             loadedData: false,
             baseURL: "",
@@ -723,9 +723,10 @@ export default {
             }, Math.max(5, this.config.autoRefreshInterval) * 1000);
 
             this.updateUpdateTimer();
-        }).catch( function (error) {
-            if (error.response.status === 404) {
-                location.href = "/page-not-found";
+        }).catch((error) => {
+            if (error.response && error.response.status === 404) {
+                // Use router to navigate, which respects base path
+                this.$router.push("/page-not-found").catch(() => {});
             }
             console.log(error);
         });
@@ -862,7 +863,7 @@ export default {
 
                     setTimeout(() => {
                         this.loading = false;
-                        location.href = "/status/" + this.config.slug;
+                        this.$router.push("/status/" + this.config.slug).catch(() => {});
                     }, time);
 
                 } else {
@@ -888,7 +889,7 @@ export default {
             this.$root.getSocket().emit("deleteStatusPage", this.slug, (res) => {
                 if (res.ok) {
                     this.enableEditMode = false;
-                    location.href = "/manage-status-page";
+                    this.$router.push("/manage-status-page").catch(() => {});
                 } else {
                     this.$root.toastError(res.msg);
                 }
@@ -934,7 +935,7 @@ export default {
          * @returns {void}
          */
         discard() {
-            location.href = "/status/" + this.slug;
+            this.$router.push("/status/" + this.slug).catch(() => {});
         },
 
         /**

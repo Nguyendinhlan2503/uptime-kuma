@@ -192,8 +192,35 @@ const routes = [
     },
 ];
 
+// Get base path from window location or default to empty string
+const getBasePath = () => {
+    // Try to get from base tag if exists
+    const baseTag = document.querySelector("base");
+    if (baseTag && baseTag.getAttribute("href")) {
+        const baseHref = baseTag.getAttribute("href");
+        // Remove trailing slash and return
+        const path = baseHref.replace(/\/$/, "");
+        console.log("[Router] Base path detected from base tag:", path);
+        return path;
+    }
+    // Fallback: detect from pathname
+    const pathname = window.location.pathname;
+    const pathParts = pathname.split("/").filter(p => p);
+    const knownRoutes = ["setup-database", "setup", "dashboard", "status", "status-page", "list", "add", "settings", "maintenance", "manage-status-page", "add-status-page"];
+    if (pathParts.length > 0 && !knownRoutes.includes(pathParts[0])) {
+        const path = `/${pathParts[0]}`;
+        console.log("[Router] Base path detected from pathname (fallback):", path);
+        return path;
+    }
+    console.log("[Router] No base path detected");
+    return "";
+};
+
+// Detect base path immediately (base tag should be in HTML when script loads)
+const detectedBasePath = getBasePath();
+
 export const router = createRouter({
     linkActiveClass: "active",
-    history: createWebHistory(),
+    history: createWebHistory(detectedBasePath),
     routes,
 });

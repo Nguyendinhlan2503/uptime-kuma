@@ -128,10 +128,14 @@ router.get("/api/status-page/:slug/manifest.json", cache("1440 minutes"), async 
             return;
         }
 
+        // Get base path from config
+        const { basePath } = require("../config");
+        const startUrl = basePath ? `${basePath}/status/${statusPage.slug}` : `/status/${statusPage.slug}`;
+
         // Response
         response.json({
             "name": statusPage.title,
-            "start_url": "/status/" + statusPage.slug,
+            "start_url": startUrl,
             "display": "standalone",
             "icons": [
                 {

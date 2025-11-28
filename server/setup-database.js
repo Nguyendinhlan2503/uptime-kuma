@@ -37,6 +37,12 @@ class SetupDatabase {
      */
     constructor(args, server) {
         this.server = server;
+        this.basePath = args["base-path"] || process.env.UPTIME_KUMA_BASE_PATH || "";
+        // Normalize base path
+        if (this.basePath) {
+            this.basePath = this.basePath.startsWith("/") ? this.basePath : "/" + this.basePath;
+            this.basePath = this.basePath.replace(/\/$/, "");
+        }
 
         // Priority: env > db-config.json
         // If env is provided, write it to db-config.json
@@ -116,18 +122,41 @@ class SetupDatabase {
                 next();
             });
 
-            app.get("/", async (request, response) => {
-                response.redirect("/setup-database");
+            // Create router for base path if needed
+            const router = this.basePath ? express.Router() : app;
+
+            router.get("/", async (request, response) => {
+                // Serve HTML and let Vue Router handle the routing
+                let html = this.server.originalIndexHTML;
+                if (this.basePath) {
+                    const baseHref = `<base href="${this.basePath}/">`;
+                    if (!html.includes("<base")) {
+                        html = html.replace("<head>", `<head>${baseHref}`);
+                    } else {
+                        html = html.replace(/<base[^>]*>/, baseHref);
+                    }
+                    // Prefix absolute paths with base path
+                    html = html.replace(/(href|src)=["'](\/[^"']+)["']/g, (match, attr, path) => {
+                        if (path.startsWith("//") || path.startsWith("http://") || path.startsWith("https://")) {
+                            return match;
+                        }
+                        if (path.startsWith(this.basePath)) {
+                            return match;
+                        }
+                        return `${attr}="${this.basePath}${path}"`;
+                    });
+                }
+                response.send(html);
             });
 
-            app.get("/api/entry-page", async (request, response) => {
+            router.get("/api/entry-page", async (request, response) => {
                 allowDevAllOrigin(response);
                 response.json({
                     type: "setup-database",
                 });
             });
 
-            app.get("/setup-database-info", (request, response) => {
+            router.get("/setup-database-info", (request, response) => {
                 allowDevAllOrigin(response);
                 console.log("Request /setup-database-info");
                 response.json({
@@ -137,7 +166,7 @@ class SetupDatabase {
                 });
             });
 
-            app.post("/setup-database", async (request, response) => {
+            router.post("/setup-database", async (request, response) => {
                 allowDevAllOrigin(response);
 
                 if (this.runningSetup) {
@@ -245,23 +274,75 @@ class SetupDatabase {
 
             });
 
-            app.use("/", expressStaticGzip("dist", {
-                enableBrotli: true,
+            // Serve static files - must be before the catch-all route
+            router.use("/", expressStaticGzip("dist", {
+                enableBrotli: false,
+                index: false,
+                serveStatic: {
+                    maxAge: 31536000,
+                    etag: true,
+                    fallthrough: true, // Fall through to next middleware if file not found
+                },
+                // Ensure static files are served correctly with base path
+                customHeaders: (res, path) => {
+                    // Set correct MIME type for JavaScript modules
+                    if (path.endsWith(".js")) {
+                        res.setHeader("Content-Type", "application/javascript");
+                    }
+                },
             }));
 
-            app.get("*", async (_request, response) => {
-                response.send(this.server.indexHTML);
+            router.get("*", async (request, response) => {
+                // Skip if this is a request for static assets (they should be handled by expressStaticGzip)
+                const url = request.url || request.originalUrl;
+                if (url.match(/\.(js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|json|xml|txt|map)$/i)) {
+                    // This should have been handled by expressStaticGzip, return 404
+                    response.status(404).send("File not found.");
+                    return;
+                }
+                // Always use original HTML to avoid double injection
+                let html = this.server.originalIndexHTML;
+                if (this.basePath) {
+                    const baseHref = `<base href="${this.basePath}/">`;
+                    // Check if base tag already exists
+                    if (!html.includes("<base")) {
+                        html = html.replace("<head>", `<head>${baseHref}`);
+                    } else {
+                        html = html.replace(/<base[^>]*>/, baseHref);
+                    }
+                    // Prefix absolute paths with base path
+                    // Note: <base> tag only affects relative paths, not absolute paths starting with /
+                    html = html.replace(/(href|src)=["'](\/[^"']+)["']/g, (match, attr, path) => {
+                        // Skip if it's already a full URL (http://, https://, //)
+                        if (path.startsWith("//") || path.startsWith("http://") || path.startsWith("https://")) {
+                            return match;
+                        }
+                        // Skip if path already starts with base path
+                        if (path.startsWith(this.basePath)) {
+                            return match;
+                        }
+                        return `${attr}="${this.basePath}${path}"`;
+                    });
+                }
+                response.send(html);
             });
 
-            app.options("*", async (_request, response) => {
+            router.options("*", async (_request, response) => {
                 allowDevAllOrigin(response);
                 response.end();
             });
 
+            // Mount router to base path if needed
+            if (this.basePath) {
+                app.use(this.basePath, router);
+                log.info("setup-database", `Setup database server mounted at base path: ${this.basePath}`);
+            }
+
             tempServer = app.listen(port, hostname, () => {
                 log.info("setup-database", `Starting Setup Database on ${port}`);
                 let domain = (hostname) ? hostname : "localhost";
-                log.info("setup-database", `Open http://${domain}:${port} in your browser`);
+                const basePathInfo = this.basePath ? ` at ${this.basePath}` : "";
+                log.info("setup-database", `Open http://${domain}:${port}${this.basePath || ""} in your browser`);
                 log.info("setup-database", "Waiting for user action...");
             });
         });

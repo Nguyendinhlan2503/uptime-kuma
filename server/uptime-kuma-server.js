@@ -12,7 +12,7 @@ const dayjs = require("dayjs");
 const childProcessAsync = require("promisify-child-process");
 const path = require("path");
 const axios = require("axios");
-const { isSSL, sslKey, sslCert, sslKeyPassphrase } = require("./config");
+const { isSSL, sslKey, sslCert, sslKeyPassphrase, basePath } = require("./config");
 // DO NOT IMPORT HERE IF THE MODULES USED `UptimeKumaServer.getInstance()`, put at the bottom of this file instead.
 
 /**
@@ -48,6 +48,12 @@ class UptimeKumaServer {
      * @type {string}
      */
     indexHTML = "";
+
+    /**
+     * Original Index HTML (without base href injection)
+     * @type {string}
+     */
+    originalIndexHTML = "";
 
     /**
      * @type {{}}
@@ -99,7 +105,32 @@ class UptimeKumaServer {
         }
 
         try {
-            this.indexHTML = fs.readFileSync("./dist/index.html").toString();
+            this.originalIndexHTML = fs.readFileSync("./dist/index.html").toString();
+            this.indexHTML = this.originalIndexHTML;
+            // Inject base href if base path is set
+            if (basePath) {
+                const baseHref = `<base href="${basePath}/">`;
+                // Check if base tag already exists, if not, insert after <head> tag
+                if (!this.indexHTML.includes("<base")) {
+                    this.indexHTML = this.indexHTML.replace("<head>", `<head>${baseHref}`);
+                } else {
+                    // Replace existing base tag
+                    this.indexHTML = this.indexHTML.replace(/<base[^>]*>/, baseHref);
+                }
+                // Prefix absolute paths with base path
+                // Note: <base> tag only affects relative paths, not absolute paths starting with /
+                this.indexHTML = this.indexHTML.replace(/(href|src)=["'](\/[^"']+)["']/g, (match, attr, path) => {
+                    // Skip if it's already a full URL (http://, https://, //)
+                    if (path.startsWith("//") || path.startsWith("http://") || path.startsWith("https://")) {
+                        return match;
+                    }
+                    // Skip if path already starts with base path
+                    if (path.startsWith(basePath)) {
+                        return match;
+                    }
+                    return `${attr}="${basePath}${path}"`;
+                });
+            }
         } catch (e) {
             // "dist/index.html" is not necessary for development
             if (process.env.NODE_ENV !== "development") {
@@ -128,7 +159,10 @@ class UptimeKumaServer {
             };
         }
 
+        const socketIOPath = basePath ? `${basePath}/socket.io/` : "/socket.io/";
+
         this.io = new Server(this.httpServer, {
+            path: socketIOPath,
             cors,
             allowRequest: async (req, callback) => {
                 let transport;

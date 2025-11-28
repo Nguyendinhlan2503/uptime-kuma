@@ -17,6 +17,8 @@ const sslKey = args["ssl-key"] || process.env.UPTIME_KUMA_SSL_KEY || process.env
 const sslCert = args["ssl-cert"] || process.env.UPTIME_KUMA_SSL_CERT || process.env.SSL_CERT || undefined;
 const sslKeyPassphrase = args["ssl-key-passphrase"] || process.env.UPTIME_KUMA_SSL_KEY_PASSPHRASE || process.env.SSL_KEY_PASSPHRASE || undefined;
 
+const basePath = args["base-path"] || process.env.UPTIME_KUMA_BASE_PATH || "";
+
 const isSSL = sslKey && sslCert;
 
 /**
@@ -33,6 +35,9 @@ const localWebSocketURL = getLocalWebSocketURL();
 
 const demoMode = args["demo"] || false;
 
+// Normalize base path: ensure it starts with / and doesn't end with /
+const normalizedBasePath = basePath ? (basePath.startsWith("/") ? basePath : "/" + basePath).replace(/\/$/, "") : "";
+
 module.exports = {
     args,
     hostname,
@@ -43,4 +48,5 @@ module.exports = {
     isSSL,
     localWebSocketURL,
     demoMode,
+    basePath: normalizedBasePath,
 };

@@ -62,7 +62,7 @@ export default {
                 this.processing = false;
 
                 if (res.ok) {
-                    location.href = "/status/" + res.slug + "?edit";
+                    this.$router.push({ path: "/status/" + res.slug, query: { edit: true } }).catch(() => {});
                 } else {
 
                     if (res.msg.includes("UNIQUE constraint")) {

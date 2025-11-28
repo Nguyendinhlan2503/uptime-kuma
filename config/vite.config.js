@@ -3,6 +3,7 @@ import { defineConfig } from "vite";
 import visualizer from "rollup-plugin-visualizer";
 import viteCompression from "vite-plugin-compression";
 import VueDevTools from "vite-plugin-vue-devtools";
+import { basePathPlugin } from "./vite-plugin-base-path.js";
 
 const postCssScss = require("postcss-scss");
 const postcssRTLCSS = require("postcss-rtlcss");
@@ -23,6 +24,7 @@ export default defineConfig({
         visualizer({
             filename: "tmp/dist-stats.html"
         }),
+        basePathPlugin(),
         viteCompression({
             algorithm: "gzip",
             filter: viteCompressionFilter,

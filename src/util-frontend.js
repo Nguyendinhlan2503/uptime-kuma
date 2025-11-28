@@ -71,18 +71,39 @@ export function setPageLocale() {
 }
 
 /**
+ * Get base path from base tag or pathname
+ * @returns {string} Base path (e.g., "/uptime" or "")
+ */
+export function getBasePath() {
+    const baseTag = document.querySelector("base");
+    if (baseTag && baseTag.getAttribute("href")) {
+        const baseHref = baseTag.getAttribute("href");
+        return baseHref.replace(/\/$/, "");
+    }
+    // Fallback: detect from pathname
+    const pathname = window.location.pathname;
+    const pathParts = pathname.split("/").filter(p => p);
+    const knownRoutes = ["setup-database", "setup", "dashboard", "status", "status-page", "list", "add", "settings", "maintenance", "manage-status-page", "add-status-page"];
+    if (pathParts.length > 0 && !knownRoutes.includes(pathParts[0])) {
+        return `/${pathParts[0]}`;
+    }
+    return "";
+}
+
+/**
  * Get the base URL
  * Mainly used for dev, because the backend and the frontend are in different ports.
  * @returns {string} Base URL
  */
 export function getResBaseURL() {
     const env = process.env.NODE_ENV;
+    const basePath = getBasePath();
     if (env === "development" && isDevContainer()) {
-        return location.protocol + "//" + getDevContainerServerHostname();
+        return location.protocol + "//" + getDevContainerServerHostname() + basePath;
     } else if (env === "development" || localStorage.dev === "dev") {
-        return location.protocol + "//" + location.hostname + ":3001";
+        return location.protocol + "//" + location.hostname + ":3001" + basePath;
     } else {
-        return "";
+        return basePath;
     }
 }
 

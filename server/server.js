@@ -109,9 +109,14 @@ const { login } = require("./auth");
 const passwordHash = require("./password-hash");
 
 const hostname = config.hostname;
+const basePath = config.basePath;
 
 if (hostname) {
     log.info("server", "Custom hostname: " + hostname);
+}
+
+if (basePath) {
+    log.info("server", "Base path: " + basePath);
 }
 
 const port = config.port;
@@ -198,8 +203,11 @@ let needSetup = false;
     // Normal Router here
     // ***************************
 
+    // Create router for base path if needed
+    const router = basePath ? express.Router() : app;
+
     // Entry Page
-    app.get("/", async (request, response) => {
+    router.get("/", async (request, response) => {
         let hostname = request.hostname;
         if (await setting("trustProxy")) {
             const proxy = request.headers["x-forwarded-host"];
@@ -218,14 +226,16 @@ let needSetup = false;
             await StatusPage.handleStatusPageResponse(response, server.indexHTML, slug);
 
         } else if (uptimeKumaEntryPage && uptimeKumaEntryPage.startsWith("statusPage-")) {
-            response.redirect("/status/" + uptimeKumaEntryPage.replace("statusPage-", ""));
+            // Serve HTML and let Vue Router handle the routing
+            response.send(server.indexHTML);
 
         } else {
-            response.redirect("/dashboard");
+            // Serve HTML and let Vue Router handle the routing
+            response.send(server.indexHTML);
         }
     });
 
-    app.get("/setup-database-info", (request, response) => {
+    router.get("/setup-database-info", (request, response) => {
         allowDevAllOrigin(response);
         response.json({
             runningSetup: false,
@@ -234,14 +244,14 @@ let needSetup = false;
     });
 
     if (isDev) {
-        app.use(express.urlencoded({ extended: true }));
-        app.post("/test-webhook", async (request, response) => {
+        router.use(express.urlencoded({ extended: true }));
+        router.post("/test-webhook", async (request, response) => {
             log.debug("test", request.headers);
             log.debug("test", request.body);
             response.send("OK");
         });
 
-        app.post("/test-x-www-form-urlencoded", async (request, response) => {
+        router.post("/test-x-www-form-urlencoded", async (request, response) => {
             log.debug("test", request.headers);
             log.debug("test", request.body);
             response.send("OK");
@@ -249,7 +259,7 @@ let needSetup = false;
 
         const fs = require("fs");
 
-        app.get("/_e2e/take-sqlite-snapshot", async (request, response) => {
+        router.get("/_e2e/take-sqlite-snapshot", async (request, response) => {
             await Database.close();
             try {
                 fs.cpSync(Database.sqlitePath, `${Database.sqlitePath}.e2e-snapshot`);
@@ -261,7 +271,7 @@ let needSetup = false;
             response.send("Snapshot taken.");
         });
 
-        app.get("/_e2e/restore-sqlite-snapshot", async (request, response) => {
+        router.get("/_e2e/restore-sqlite-snapshot", async (request, response) => {
             if (!fs.existsSync(`${Database.sqlitePath}.e2e-snapshot`)) {
                 throw new Error("Snapshot doesn't exist.");
             }
@@ -279,7 +289,7 @@ let needSetup = false;
     }
 
     // Robots.txt
-    app.get("/robots.txt", async (_request, response) => {
+    router.get("/robots.txt", async (_request, response) => {
         let txt = "User-agent: *\nDisallow:";
         if (!await setting("searchEngineIndex")) {
             txt += " /";
@@ -292,35 +302,67 @@ let needSetup = false;
 
     // Prometheus API metrics  /metrics
     // With Basic Auth using the first user's username/password
-    app.get("/metrics", apiAuth, prometheusAPIMetrics());
+    router.get("/metrics", apiAuth, prometheusAPIMetrics());
 
-    app.use("/", expressStaticGzip("dist", {
-        enableBrotli: true,
+    // Serve static files - must be before the catch-all route
+    router.use("/", expressStaticGzip("dist", {
+        enableBrotli: false,
+        index: false,
+        serveStatic: {
+            maxAge: 31536000,
+            etag: true,
+            fallthrough: true, // Fall through to next middleware if file not found
+        },
+        // Ensure static files are served correctly with base path
+        customHeaders: (res, path) => {
+            // Set correct MIME type for JavaScript modules
+            if (path.endsWith(".js")) {
+                res.setHeader("Content-Type", "application/javascript");
+            }
+        },
     }));
 
     // ./data/upload
-    app.use("/upload", express.static(Database.uploadDir));
+    router.use("/upload", express.static(Database.uploadDir));
 
-    app.get("/.well-known/change-password", async (_, response) => {
+    router.get("/.well-known/change-password", async (_, response) => {
         response.redirect("https://github.com/louislam/uptime-kuma/wiki/Reset-Password-via-CLI");
     });
 
     // API Router
     const apiRouter = require("./routers/api-router");
-    app.use(apiRouter);
+    router.use(apiRouter);
 
     // Status Page Router
     const statusPageRouter = require("./routers/status-page-router");
-    app.use(statusPageRouter);
+    router.use(statusPageRouter);
 
     // Universal Route Handler, must be at the end of all express routes.
-    app.get("*", async (_request, response) => {
-        if (_request.originalUrl.startsWith("/upload/")) {
+    // Only handle routes that are not static files (expressStaticGzip will handle those)
+    router.get("*", async (request, response) => {
+        // Skip if this is a request for static assets (they should be handled by expressStaticGzip)
+        const url = request.url || request.originalUrl;
+        if (url.match(/\.(js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|json|xml|txt|map)$/i)) {
+            // This should have been handled by expressStaticGzip, return 404
+            response.status(404).send("File not found.");
+            return;
+        }
+        if (url.startsWith("/upload/")) {
             response.status(404).send("File not found.");
         } else {
             response.send(server.indexHTML);
         }
     });
+
+    // Mount router to base path if needed
+    if (basePath) {
+        log.info("server", `Mounting router to base path: ${basePath}`);
+        app.use(basePath, router);
+    } else {
+        log.info("server", "No base path set, routes are already on app");
+        // If no basePath, router === app, so routes are already mounted directly on app
+        // No need to mount again
+    }
 
     log.debug("server", "Adding socket handler");
     io.on("connection", async (socket) => {

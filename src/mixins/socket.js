@@ -6,7 +6,7 @@ import dayjs from "dayjs";
 import mitt from "mitt";
 
 import { DOWN, MAINTENANCE, PENDING, UP } from "../util.ts";
-import { getDevContainerServerHostname, isDevContainer, getToastSuccessTimeout, getToastErrorTimeout } from "../util-frontend.js";
+import { getDevContainerServerHostname, isDevContainer, getToastSuccessTimeout, getToastErrorTimeout, getBasePath } from "../util-frontend.js";
 const toast = useToast();
 
 let socket;
@@ -67,7 +67,12 @@ export default {
     },
 
     created() {
-        this.initSocketIO();
+        // Delay slightly to ensure base tag is available
+        this.$nextTick(() => {
+            setTimeout(() => {
+                this.initSocketIO();
+            }, 200);
+        });
     },
 
     methods: {
@@ -94,13 +99,32 @@ export default {
             }
 
             // Also don't need to connect to the socket.io for setup database page
-            if (location.pathname === "/setup-database") {
+            // Check with or without base path
+            const pathname = location.pathname;
+            if (pathname === "/setup-database" || pathname.endsWith("/setup-database")) {
                 return;
             }
 
             this.socket.initedSocketIO = true;
 
             let protocol = location.protocol + "//";
+
+            // Get base path using utility function
+            let basePath = getBasePath();
+
+            // If still no base path, try to detect from current pathname directly
+            if (!basePath) {
+                const pathname = location.pathname;
+                const pathParts = pathname.split("/").filter(p => p);
+                const knownRoutes = ["setup-database", "setup", "dashboard", "status", "status-page", "list", "add", "settings", "maintenance", "manage-status-page", "add-status-page"];
+                if (pathParts.length > 0 && !knownRoutes.includes(pathParts[0])) {
+                    basePath = `/${pathParts[0]}`;
+                    console.log("[Socket] Base path detected from pathname (fallback):", basePath);
+                }
+            }
+
+            console.log("[Socket] Final base path:", basePath || "(none)");
+            console.log("[Socket] Current pathname:", location.pathname);
 
             let url;
             const env = process.env.NODE_ENV || "production";
@@ -109,11 +133,20 @@ export default {
             } else if (env === "development" || localStorage.dev === "dev") {
                 url = protocol + location.hostname + ":3001";
             } else {
-                // Connect to the current url
+                // Connect to the current url (will use base path from socketIOOptions.path)
                 url = undefined;
             }
 
-            socket = io(url);
+            // Configure socket.io with base path
+            const socketIOOptions = {};
+            if (basePath) {
+                socketIOOptions.path = `${basePath}/socket.io/`;
+                console.log("[Socket] Socket.io path set to:", socketIOOptions.path);
+            } else {
+                console.log("[Socket] Using default socket.io path: /socket.io/");
+            }
+
+            socket = io(url, socketIOOptions);
 
             socket.on("info", (info) => {
                 this.info = info;

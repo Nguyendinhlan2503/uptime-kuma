@@ -24,3 +24,10 @@ extra/exe-builder/obj
 
 .vs
 .vscode
+
+# Build artifacts and temporary files
+*.tar
+*.tar.gz
+build-release.ps1
+push-with-token.ps1
+quick-push.ps1
